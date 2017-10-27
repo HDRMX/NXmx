@@ -1,90 +1,89 @@
 import h5py
 import numpy
 
-def make_or_get_group(h5_file, path, attrs={}):
-  if path in h5_file:
-    return h5_file[path]
-  group = h5_file.create_group(path)
-  for attr, value in attrs.items():
-    group.attrs[attr] = value
-  return group
+class NXGroup(object):
+  def __init__(self, name, attrs={}, parent=None):
+    self._name = name
+    self._attrs = attrs
+    self._children = { }
+    self._datasets = { }
+    self._parent = parent
 
-def create_string_dataset(h5_file, path, value, attrs={}):
-  d = h5_file.create_dataset(path, (), dtype='S%d' % len(value))
-  d[...] = value
-  for attr, value in attrs.items():
-    d.attrs[attr] = value
-  return d
+  def group(self, name, attrs={}):
+    if not name in self._children:
+      self._children[name] = NXGroup(name, attrs, parent=self)
+    return self._children[name]
 
-def create_float_scalar(h5_file, path, value, attrs={}):
-  d = h5_file.create_dataset(path, (), dtype='f')
-  d[...] = value
-  for attr, value in attrs.items():
-    d.attrs[attr] = value
-  return d
+  def dataset(self, name, values, attrs={}, params={}):
+    if not name in self._datasets:
+      self._datasets[name] = NXDataset(name, values, attrs=attrs, parent=self,
+                                       params=params)
+    return self._datasets[name]
 
-def make_NXmx(h5_file):
-  entry = make_or_get_group(h5_file, 'entry', {'NX_class':'NXentry'})
-  create_string_dataset(h5_file, 'entry/definition', 'NXmx')
-  instrument = make_or_get_group(entry, 'instrument',
-                                 {'NX_class':'NXinstrument'})
-  
-def create_detector(h5_file):
-  # first construct detector stages, detector_z, detector_2theta
-  instrument = make_or_get_group(h5_file, 'entry/instrument')
-  
-  detector_2t = make_or_get_group(instrument, 'detector_2theta',
-                                  {'NX_class':'NXpositioner'})
+  def path(self):
+    if self._parent:
+      return '%s/%s' % (self._parent.path(), self._name)
+    return self._name
 
-  detector_2t_d = create_float_scalar(detector_2t, 'two_theta', 0.0,
-                                      {'units':'degrees',
-                                       'translation_type':'rotation',
-                                       'vector':[1,0,0]})
+  def h5(self, h5_file):
+    group = h5_file.create_group(self._name)
+    for attr, value in self._attrs.items():
+      group.attrs[attr] = value
+    for name, child in self._children.items():
+      child.h5(group)
+    for name, dataset in self._datasets.items():
+      dataset.h5(group)
+    return group
 
-  detector_z = make_or_get_group(instrument, 'detector_z',
-                                 {'NX_class':'NXpositioner'})
+class NXDataset(object):
+  def __init__(self, name, values, attrs={}, parent=None, params={}):
+    self._name = name
+    self._values = values
+    self._attrs = attrs
+    self._parent = parent
+    self._params = params
 
-  detector_z_d = create_float_scalar(detector_z, 'z', 100.0,
-                                     {'units':'mm',
-                                      'translation_type':'translation',
-                                      'vector':[0,0,1]})
+  def path(self):
+    if self._parent:
+      return '%s/%s' % (self._parent.path(), self._name)
+    return self._name
 
-  detector = make_or_get_group(instrument, 'detector',
-                               {'NX_class':'NXdetector'})
+  def h5(self, h5_file):
+    if hasattr(self._values, 'shape'):
+      dataset = h5_file.create_dataset(self._name, self._values.shape,
+                                       **self._params)
+    else:
+      dataset = h5_file.create_dataset(self._name, (), **self._params)
+    dataset[...] = self._values
+    for attr, value in self._attrs.items():
+      dataset.attrs[attr] = value
+    return dataset
 
-  detector_t = make_or_get_group(detector, 'transformations',
-                                 {'NX_class':'NXtransformations'})
+def main(filename):
+  entry = NXGroup('entry', attrs={'NX_class':'NXentry'})
+  instrument = entry.group('instrument', attrs={'NX_class':'NXinstrument'})
+  detector = instrument.group('detector', attrs={'NX_class':'NXdetector'})
+  d2t = instrument.group('detector_2t', attrs={'NX_class':'NXpositioner'})
+  d2t_data = d2t.dataset('two_theta', 0.0, {'units':'degrees',
+                                            'translation_type':'rotation',
+                                            'vector':[-1,0,0],
+                                            'depends_on':'.'})
+  dz = instrument.group('detector_z', attrs={'NX_class':'NXpositioner'})
+  dz_data = dz.dataset('z', 100.0, {'units':'mm',
+                                    'translation_type':'translation',
+                                    'vector':[0,0,1],
+                                    'depends_on':d2t_data.path()})
+  transform = detector.group('transformations',
+                             attrs={'NX_class':'NXtramsformations'})
+  zeros = entry.dataset('zeros', numpy.zeros((16, 16, 16), dtype=numpy.int),
+                        params={'chunks':(1, 16, 16),
+                                'compression':'gzip',
+                                'compression_opts':9})
 
-  # make hard links in the transformations group
-  detector_t['z'] = detector_z
-  detector_t['two_theta'] = detector_2t
-  
-  
-def create_goniometer(h5_file):
-  pass
-
-def create_beam(h5_file):
-  pass
-
-def create_data(h5_file):
-  s = (16, 16, 16)
-  d = h5_file.create_dataset('zeros', s, dtype='i', chunks=(1, 16, 16),
-                             compression='gzip', compression_opts=9)
-  d[...] = numpy.zeros(s, dtype=numpy.int)
-  d.attrs['maximum_value'] = 0.0
-  d.attrs['minimum_value'] = 0.0
-  
-def create_empty_hdf5_file(filename):
   f = h5py.File(filename, 'w')
-  make_NXmx(f)
-  create_detector(f)
-  create_goniometer(f)
-  create_beam(f)
-  create_data(f)
+  entry.h5(f)
   f.close()
 
 if __name__ == '__main__':
   import sys
-  create_empty_hdf5_file(sys.argv[1])
-  
-  
+  main(sys.argv[1])
