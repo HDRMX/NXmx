@@ -144,6 +144,10 @@ def main(filename):
   detector.dataset('beam_centre_x', beam_x_pixels, {'units':'pixels'})
   detector.dataset('beam_centre_y', beam_y_pixels, {'units':'pixels'})
 
+  # alternative spellings as softlinks
+  detector.softlink('beam_center_x', 'beam_centre_x')
+  detector.softlink('beam_center_y', 'beam_centre_y')
+
   detector.dataset('x_pixel_size', pixel_x_size, {'units':'mm'})
   detector.dataset('y_pixel_size', pixel_y_size, {'units':'mm'})
 
