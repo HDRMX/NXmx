@@ -7,6 +7,7 @@ class NXGroup(object):
     self._attrs = attrs
     self._children = { }
     self._datasets = { }
+    self._links = { }
     self._parent = parent
 
   def group(self, name, attrs={}):
@@ -19,6 +20,12 @@ class NXGroup(object):
       self._datasets[name] = NXDataset(name, values, attrs=attrs, parent=self,
                                        params=params)
     return self._datasets[name]
+
+  def softlink(self, name, target):
+    self._links[name] = NXSoftlink(name, target, parent=self)
+
+  def hardlink(self, name, target):
+    self._links[name] = NXHardlink(name, target, parent=self)
 
   def path(self):
     if self._parent:
@@ -33,6 +40,8 @@ class NXGroup(object):
       child.h5(group)
     for name, dataset in self._datasets.items():
       dataset.h5(group)
+    for name, link in self._links.items():
+      link.h5(group)
     return group
 
 class NXDataset(object):
@@ -65,6 +74,34 @@ class NXDataset(object):
     for attr, value in self._attrs.items():
       dataset.attrs[attr] = value
     return dataset
+
+class NXSoftlink(object):
+  def __init__(self, name, target, parent=None):
+    self._name = name
+    self._target = target
+    self._parent = parent
+
+  def path(self):
+    if self._parent:
+      return '%s/%s' % (self._parent.path(), self._name)
+    return self._name
+
+  def h5(self, h5_file):
+    h5_file[self._name] = h5py.SoftLink(self._target)
+
+class NXHardlink(object):
+  def __init__(self, name, target, parent=None):
+    self._name = name
+    self._target = target
+    self._parent = parent
+
+  def path(self):
+    if self._parent:
+      return '%s/%s' % (self._parent.path(), self._name)
+    return self._name
+
+  def h5(self, h5_file):
+    h5_file[self._name] = h5_file['/%s' % self._target]
 
 def main(filename):
   entry = NXGroup('entry', attrs={'NX_class':'NXentry'})
